@@ -2,7 +2,6 @@
 using HarmonyLib;
 using IPA.Utilities;
 using System;
-using System.Reflection;
 
 namespace CustomCampaigns.HarmonyPatches
 {
@@ -11,18 +10,16 @@ namespace CustomCampaigns.HarmonyPatches
     {
         static bool Prefix(MissionNodeVisualController missionNodeVisualController, MissionSelectionMapViewController __instance, SongPreviewPlayer ____songPreviewPlayer)
         {
-            if (missionNodeVisualController.missionNode.missionData is CustomMissionDataSO)
+            if (!(missionNodeVisualController.missionNode.missionData is CustomMissionDataSO customMissionDataSo)) return true;
+
+            __instance.SetField("_selectedMissionNode", missionNodeVisualController.missionNode);
+            BeatmapLevel level = customMissionDataSo.beatmapLevel;
+            if (level != null)
             {
-                __instance.SetField("_selectedMissionNode", missionNodeVisualController.missionNode);
-                CustomPreviewBeatmapLevel level = (missionNodeVisualController.missionNode.missionData as CustomMissionDataSO).customLevel;
-                if (level != null)
-                {
-                    __instance.GetType().GetMethod("SongPlayerCrossfadeToLevelAsync", AccessTools.all)?.Invoke(__instance, new object[] { level });
-                }
-                __instance.GetField<Action<MissionSelectionMapViewController, MissionNode>, MissionSelectionMapViewController>("didSelectMissionLevelEvent")?.Invoke(__instance, missionNodeVisualController.missionNode);
-                return false;
+                __instance.InvokeMethod<object, MissionSelectionMapViewController>("SongPlayerCrossfadeToLevelAsync", level);
             }
-            return true;
+            __instance.GetField<Action<MissionSelectionMapViewController, MissionNode>, MissionSelectionMapViewController>("didSelectMissionLevelEvent")?.Invoke(__instance, missionNodeVisualController.missionNode);
+            return false;
         }
     }
 }

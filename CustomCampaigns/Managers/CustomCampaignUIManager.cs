@@ -1,6 +1,7 @@
 ﻿using BeatSaberMarkupLanguage;
 using BeatSaberMarkupLanguage.Attributes;
 using BeatSaberMarkupLanguage.Components.Settings;
+using BGLib.Polyglot;
 using CustomCampaigns.Campaign;
 using CustomCampaigns.Campaign.Missions;
 using CustomCampaigns.External;
@@ -12,18 +13,17 @@ using CustomCampaigns.Utils;
 using HarmonyLib;
 using HMUI;
 using IPA.Utilities;
-using Polyglot;
 using SiraUtil.Affinity;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.Menu;
 
 namespace CustomCampaigns.Managers
 {
@@ -107,7 +107,7 @@ namespace CustomCampaigns.Managers
         private string selectedAlt;
 
         [UIValue("missionAlts")]
-        public List<object> missionAlts = new object[] { "t" }.ToList(); 
+        public List<object> missionAlts = new object[] { "t" }.ToList();
 
         private ImageView _levelBarBackground;
         private Color _originalLevelBarBackgroundColor;
@@ -212,7 +212,7 @@ namespace CustomCampaigns.Managers
             Plugin.logger.Debug("custom campaign enabled");
 
             InitializeMissionDetails();
-           
+
             if (!_config.floorLeaderboard)
             {
                 customCampaignEnabledEvent?.Invoke();
@@ -512,8 +512,8 @@ namespace CustomCampaigns.Managers
             }
 
             CustomMissionDataSO missionData = _missionLevelDetailViewController.missionNode.missionData as CustomMissionDataSO;
-            Mission mission = missionData.mission;
-            CustomPreviewBeatmapLevel level = missionData.customLevel;
+            Mission mission = missionData!.mission;
+            var level = missionData.beatmapLevel;
 
             bool showGlobalLeaderboard = mission.allowStandardLevel && level != null && Plugin.isScoreSaberInstalled;
 
@@ -522,34 +522,27 @@ namespace CustomCampaigns.Managers
             {
                 Plugin.logger.Debug("showing global leaderboard");
 
-                IDifficultyBeatmap difficultyBeatmap = BeatmapUtils.GetMatchingBeatmapDifficulty(level.levelID, missionData.beatmapCharacteristic, mission.difficulty);
-                if (difficultyBeatmap == null)
+                _globalLeaderboardViewController.SetData(new BeatmapKey(level.levelID, missionData.beatmapCharacteristic, mission.difficulty));
+                if (_config.floorLeaderboard)
                 {
-                    Plugin.logger.Debug("couldn't find matching difficultybeatmap");
+                    Plugin.logger.Debug("floor leaderboard");
+                    _campaignMissionLeaderboardViewController.customURL = missionData.campaign.info.customMissionLeaderboard;
+                    _campaignMissionLeaderboardViewController.mission = mission;
+                    _campaignFlowCoordinator.InvokeMethod<object, CampaignFlowCoordinator>("SetRightScreenViewController", _campaignMissionLeaderboardViewController, ViewController.AnimationType.In);
+                    _campaignMissionLeaderboardViewController.UpdateLeaderboards();
+                    _campaignFlowCoordinator.InvokeMethod<object, CampaignFlowCoordinator>("SetBottomScreenViewController", _globalLeaderboardViewController, ViewController.AnimationType.None);
+
+                    _globalLeaderboardViewController.transform.localPosition = _leaderboardPosition;
                 }
                 else
                 {
-                    _globalLeaderboardViewController.SetData(difficultyBeatmap);
-                    if (_config.floorLeaderboard)
-                    {
-                        Plugin.logger.Debug("floor leaderboard");
-                        _campaignMissionLeaderboardViewController.customURL = missionData.campaign.info.customMissionLeaderboard;
-                        _campaignMissionLeaderboardViewController.mission = mission;
-                        _campaignFlowCoordinator.InvokeMethod<object, CampaignFlowCoordinator>("SetRightScreenViewController", _campaignMissionLeaderboardViewController, ViewController.AnimationType.In);
-                        _campaignMissionLeaderboardViewController.UpdateLeaderboards();
-                        _campaignFlowCoordinator.InvokeMethod<object, CampaignFlowCoordinator>("SetBottomScreenViewController", _globalLeaderboardViewController, ViewController.AnimationType.None);
+                    Plugin.logger.Debug("boring leaderboard");
+                    _campaignFlowCoordinator.InvokeMethod<object, CampaignFlowCoordinator>("SetRightScreenViewController", _globalLeaderboardViewController, ViewController.AnimationType.In);
 
-                        _globalLeaderboardViewController.transform.localPosition = _leaderboardPosition;
-                    }
-                    else
-                    {
-                        Plugin.logger.Debug("boring leaderboard");
-                        _campaignFlowCoordinator.InvokeMethod<object, CampaignFlowCoordinator>("SetRightScreenViewController", _globalLeaderboardViewController, ViewController.AnimationType.In);
-
-                        missionDataReadyEvent?.Invoke(mission, missionData.campaign.info.customMissionLeaderboard, GetNodeColor(_missionLevelDetailViewController.missionNode));
-                        leaderboardUpdateEvent?.Invoke();
-                    }
+                    missionDataReadyEvent?.Invoke(mission, missionData.campaign.info.customMissionLeaderboard, GetNodeColor(_missionLevelDetailViewController.missionNode));
+                    leaderboardUpdateEvent?.Invoke();
                 }
+
             }
             else
             {
@@ -568,7 +561,7 @@ namespace CustomCampaigns.Managers
         {
             CustomMissionDataSO missionData = _missionLevelDetailViewController.missionNode.missionData as CustomMissionDataSO;
             Mission mission = missionData.mission;
-            CustomPreviewBeatmapLevel level = missionData.customLevel;
+            var level = missionData.beatmapLevel;
 
             if (level == null)
             {
@@ -576,35 +569,31 @@ namespace CustomCampaigns.Managers
             }
             else
             {
-                IDifficultyBeatmap difficultyBeatmap = BeatmapUtils.GetMatchingBeatmapDifficulty(level.levelID, missionData.beatmapCharacteristic, mission.difficulty);
-                if (difficultyBeatmap == null)
+                var levelBeatmap = SongCore.Loader.BeatmapLevelsModelSO.GetBeatmapLevel(level.levelID);
+                if (levelBeatmap == null)
                 {
-                    Plugin.logger.Debug("couldn't find matching difficultybeatmap");
+                    Plugin.logger.Debug("couldn't find levelBeatmap");
                     SetLevelParamsTextNotAvailable();
                     return;
                 }
 
-                var audioClip = SongCore.Loader.BeatmapLevelsModelSO.GetBeatmapLevelIfLoaded(level.levelID).beatmapLevelData.audioClip;
-
-                CustomDifficultyBeatmap customDifficultyBeatmap = difficultyBeatmap as CustomDifficultyBeatmap;
-
-                if (customDifficultyBeatmap == null)
-                {
-                    Plugin.logger.Error("difficulty beatmap was not a custom beatmap??????!111");
-                    return;
-                }
+                //TODO: I don't know if it's the right way to do it.
+                var audioClipTask = levelBeatmap.previewMediaData.GetPreviewAudioClip(CancellationToken.None);
+                audioClipTask.Wait();
+                var audioClip = audioClipTask.Result;
 
                 IReadonlyBeatmapData beatmapData = null;
-                await Task.Run(delegate ()
+                await Task.Run(delegate
                 {
-                    beatmapData = BeatmapDataLoader.GetBeatmapDataFromSaveData(customDifficultyBeatmap.beatmapSaveData, customDifficultyBeatmap.difficulty, customDifficultyBeatmap.level.beatsPerMinute, false, null, null);
+                    //beatmapData = BeatmapDataLoader.LoadBeatmapData(customDifficultyBeatmap.beatmapSaveData, _levelda, customDifficultyBeatmap.level.beatsPerMinute, false, null, null);
                 });
 
+                //TODO: Yes do it.
                 _levelParamsPanel.notesPerSecond = beatmapData.cuttableNotesCount / audioClip.length;
                 _levelParamsPanel.notesCount = beatmapData.cuttableNotesCount;
 
                 SetTime(audioClip);
-                SetNJS(difficultyBeatmap.noteJumpMovementSpeed);
+                //SetNJS(difficultyBeatmap.noteJumpMovementSpeed);
             }
         }
 
@@ -798,7 +787,7 @@ namespace CustomCampaigns.Managers
         public void CreateModifierParamsList(MissionNode missionNode)
         {
             Plugin.logger.Debug("creating modifier param list");
-            Mission mission = (missionNode.missionData as CustomMissionDataSO).mission;
+            Mission mission = (missionNode.missionData as CustomMissionDataSO)!.mission;
             List<GameplayModifierParamsSO> modifierParams = _gameplayModifiersModel.CreateModifierParamsList(missionNode.missionData.gameplayModifiers);
 
             foreach (string modName in mission.externalModifiers.Keys)
@@ -1097,30 +1086,29 @@ namespace CustomCampaigns.Managers
         private bool MissionLevelDetailViewControllerRefreshContentPrefix(MissionLevelDetailViewController __instance, MissionNode ____missionNode, LevelBar ____levelBar, ObjectiveListItemsList ____objectiveListItems,
                             GameplayModifiersModelSO ____gameplayModifiersModel, GameObject ____modifiersPanelGO, GameplayModifierInfoListItemsList ____gameplayModifierInfoListItemsList)
         {
-            if (____missionNode.missionData is CustomMissionDataSO && _inCustomCampaign)
+            if (!(____missionNode.missionData is CustomMissionDataSO customMissionDataSo && _inCustomCampaign)) return true;
+
+            _missionData = customMissionDataSo;
+            var level = _missionData.beatmapLevel;
+            if (level == null)
             {
-                _missionData = ____missionNode.missionData as CustomMissionDataSO;
-                CustomPreviewBeatmapLevel level = _missionData.customLevel;
-                if (level == null)
-                {
-                    ____levelBar.GetField<TextMeshProUGUI, LevelBar>("_songNameText").text = "SONG NOT FOUND";
-                    ____levelBar.GetField<TextMeshProUGUI, LevelBar>("_difficultyText").text = "SONG NOT FOUND";
-                    ____levelBar.GetField<TextMeshProUGUI, LevelBar>("_authorNameText").text = "SONG NOT FOUND";
-                    ____levelBar.GetField<ImageView, LevelBar>("_songArtworkImageView").sprite = SongCore.Loader.defaultCoverImage;
-                }
-                else
-                {
-                    ____levelBar.Setup(level, _missionData.beatmapCharacteristic, _missionData.beatmapDifficulty);
-                }
-                ChangePosition();
-
-                MissionObjective[] missionObjectives = _missionData.missionObjectives;
-                ____objectiveListItems.SetData((missionObjectives.Length == 0) ? 1 : missionObjectives.Length, OnItemFinish);
-
-                CreateModifierParamsList(____missionNode);
-                return false;
+                ____levelBar.GetField<TextMeshProUGUI, LevelBar>("_songNameText").text = "SONG NOT FOUND";
+                ____levelBar.GetField<TextMeshProUGUI, LevelBar>("_difficultyText").text = "SONG NOT FOUND";
+                ____levelBar.GetField<TextMeshProUGUI, LevelBar>("_authorNameText").text = "SONG NOT FOUND";
+                ____levelBar.GetField<ImageView, LevelBar>("_songArtworkImageView").sprite = SongCore.Loader.defaultCoverImage;
             }
-            return true;
+            else
+            {
+                ____levelBar.Setup(_missionData.beatmapKey);
+            }
+            ChangePosition();
+
+            MissionObjective[] missionObjectives = _missionData.missionObjectives;
+            ____objectiveListItems.SetData((missionObjectives.Length == 0) ? 1 : missionObjectives.Length, OnItemFinish);
+
+            CreateModifierParamsList(____missionNode);
+            return false;
+
         }
 
         private void OnItemFinish(int idx, ObjectiveListItem objectiveListItem)
@@ -1144,7 +1132,7 @@ namespace CustomCampaigns.Managers
                     objectiveListItem.title = missionObjective.type.objectiveNameLocalized;
                     objectiveListItem.hideCondition = false;
                     ObjectiveValueFormatterSO objectiveValueFormater = missionObjective.type.objectiveValueFormater;
-                    objectiveListItem.conditionText = $"{MissionDataExtensions.Name(missionObjective.referenceValueComparisonType)} {objectiveValueFormater.FormatValue(missionObjective.referenceValue)}";
+                    objectiveListItem.conditionText = $"{missionObjective.referenceValueComparisonType.Name()} {objectiveValueFormater.FormatValue(missionObjective.referenceValue)}";
                 }
             }
         }

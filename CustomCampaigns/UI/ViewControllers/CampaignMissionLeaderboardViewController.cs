@@ -167,7 +167,7 @@ namespace CustomCampaigns.UI.ViewControllers
                 return 0;
             }
             var levelId = level.levelID;
-            var beatmapLevel = Loader.BeatmapLevelsModelSO.GetBeatmapLevelIfLoaded(levelId);
+            var beatmapLevel = Loader.BeatmapLevelsModelSO.GetBeatmapLevel(levelId);
             if (beatmapLevel == null)
             {
                 return 0;
@@ -184,14 +184,19 @@ namespace CustomCampaigns.UI.ViewControllers
                 return 0;
             }
 
+            var beatmapData = Loader.CustomLevelLoader.LoadBeatmapLevelData(beatmapLevel);
 
-            IDifficultyBeatmap difficultyBeatmap = BeatmapUtils.GetMatchingBeatmapDifficulty(levelId, missionData.beatmapCharacteristic, mission.difficulty);
-            if (difficultyBeatmap == null)
+            if (beatmapData is null)
             {
+                Plugin.logger.Error($"[{nameof(GetMaxScore)}]: BeatmapData is null");
                 return 0;
             }
 
-            return ScoreModel.ComputeMaxMultipliedScoreForBeatmap(await difficultyBeatmap.GetBeatmapDataAsync(difficultyBeatmap.GetEnvironmentInfo(), null));
+            //TODO: Yes do it
+            //var readonlyBeatmapData = BeatmapDataLoader.LoadBeatmapData(beatmapData, missionData.beatmapKey, 120,
+
+            //return ScoreModel.ComputeMaxMultipliedScoreForBeatmap(readonlyBeatmapData);
+            return int.MaxValue / 2;
         }
     }
 }

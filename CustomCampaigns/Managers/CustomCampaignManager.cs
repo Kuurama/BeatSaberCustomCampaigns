@@ -1,4 +1,5 @@
-﻿using BeatSaberMarkupLanguage;
+﻿using BeatSaber.PerformancePresets;
+using BeatSaberMarkupLanguage;
 using CustomCampaigns.Campaign.Missions;
 using CustomCampaigns.HarmonyPatches;
 using CustomCampaigns.UI.MissionObjectiveGameUI;
@@ -250,10 +251,16 @@ namespace CustomCampaigns.Managers
                 return;
             }
 
+            if (!(missionNodeVisualController.missionNode.missionData is CustomMissionDataSO customMissionDataSO))
+            {
+                Plugin.logger.Error($"[{nameof(OnDidSelectMissionNode)}]: MissionData failed wasn't present");
+                return;
+            }
+
             _missionLevelDetailViewController.didPressPlayButtonEvent -=
                 (Action<MissionLevelDetailViewController>) _missionSelectionNavigationController.GetType().GetMethod("HandleMissionLevelDetailViewControllerDidPressPlayButton", AccessTools.all)
                     ?.CreateDelegate(typeof(Action<MissionLevelDetailViewController>), _missionSelectionNavigationController);
-            CustomPreviewBeatmapLevel level = (missionNodeVisualController.missionNode.missionData as CustomMissionDataSO)?.mission.FindSong();
+            var level = customMissionDataSO.mission.FindSong();
             if (level == null)
             {
                 _missionSelectionMapViewController.GetType().GetMethod("HandleMissionNodeSelectionManagerDidSelectMissionNode", AccessTools.all)
@@ -265,7 +272,7 @@ namespace CustomCampaigns.Managers
                 Plugin.logger.Debug("found level");
                 _customCampaignUIManager.SetPlayButtonText("PLAY");
 
-                LoadBeatmap(missionNodeVisualController, (missionNodeVisualController.missionNode.missionData as CustomMissionDataSO)?.customLevel.levelID);
+                LoadBeatmap(missionNodeVisualController, customMissionDataSO.beatmapLevel.levelID);
             }
             _customCampaignUIManager.SetPlayButtonInteractable(true);
         }
@@ -365,10 +372,10 @@ namespace CustomCampaigns.Managers
             _downloadManager.DownloadStatus -= OnDownloadStatusUpdate;
         }
 
-        private void OnSongsLoaded(Loader loader, ConcurrentDictionary<string, CustomPreviewBeatmapLevel> levels)
+        private void OnSongsLoaded(Loader loader, ConcurrentDictionary<string, BeatmapLevel> levels)
         {
             Plugin.logger.Debug("songs loaded");
-            (_missionLevelDetailViewController.missionNode.missionData as CustomMissionDataSO).mission.SetCustomLevel();
+            (_missionLevelDetailViewController.missionNode.missionData as CustomMissionDataSO)!.mission.SetCustomLevel();
             _customCampaignUIManager.RefreshMissionNodeData();
             _customCampaignUIManager.ClearProgressBar();
 
@@ -380,13 +387,20 @@ namespace CustomCampaigns.Managers
 
         private async void PlayMap(MissionLevelDetailViewController missionLevelDetailViewController)
         {
-            Plugin.logger.Debug("play");
             _currentNode = missionLevelDetailViewController.missionNode;
-            MissionDataSO missionDataSO = _currentNode.missionData;
-            _currentMissionDataSO = missionDataSO as CustomMissionDataSO;
+
+            if (!(_currentNode.missionData is CustomMissionDataSO customMissionDataSO))
+            {
+                Plugin.logger.Error($"[{nameof(PlayMap)}]: MissionData is null/wrong type");
+                return;
+            }
+
+            Plugin.logger.Debug("play");
+
+            _currentMissionDataSO = customMissionDataSO;
             currentMissionData = _currentMissionDataSO;
 
-            _currentMissionCleared = _playerDataModel.playerData.GetPlayerMissionStatsData(_currentNode.missionId).cleared;
+            _currentMissionCleared = _playerDataModel.playerData.GetOrCreatePlayerMissionStatsData(_currentNode.missionId).cleared;
 
             Mission mission = _currentMissionDataSO.mission;
 
@@ -419,8 +433,7 @@ namespace CustomCampaigns.Managers
                     if (missionHelp != null && !_playerDataModel.playerData.WasMissionHelpShowed(missionHelp))
                     {
                         _missionHelpViewController.didFinishEvent += HelpControllerDismissed;
-                        _missionSelectionNavigationController.GetType().GetMethod("HandleMissionLevelDetailViewControllerDidPressPlayButton", AccessTools.all)
-                            ?.Invoke(_missionSelectionNavigationController, new object[] { missionLevelDetailViewController });
+                        _missionSelectionNavigationController.InvokeMethod<object, MissionSelectionNavigationController>("HandleMissionLevelDetailViewControllerDidPressPlayButton", missionLevelDetailViewController);
                     }
                     else
                     {
@@ -467,36 +480,42 @@ namespace CustomCampaigns.Managers
         {
             isCampaignLevel = true;
 
-            var level = (_missionLevelDetailViewController.missionNode.missionData as CustomMissionDataSO)?.customLevel.levelID;
+            var level = (_missionLevelDetailViewController.missionNode.missionData as CustomMissionDataSO)!.beatmapLevel.levelID;
             currentMissionData = _currentMissionDataSO;
-            var beatmapLevel = Loader.BeatmapLevelsModelSO.GetBeatmapLevelIfLoaded(level);
-            IDifficultyBeatmap difficultyBeatmap = BeatmapLevelDataExtensions.GetDifficultyBeatmap(beatmapLevel.beatmapLevelData, _currentMissionDataSO.beatmapCharacteristic, _currentMissionDataSO.beatmapDifficulty);
-            GameplayModifiers gameplayModifiers = _currentMissionDataSO.gameplayModifiers;
-            MissionObjective[] missionObjectives = _currentMissionDataSO.missionObjectives;
-            GameplaySetupViewController gameplaySetupViewController = _campaignFlowCoordinator.GetField<GameplaySetupViewController, CampaignFlowCoordinator>("_gameplaySetupViewController");
-            PlayerSpecificSettings playerSettings = gameplaySetupViewController.playerSettings;
-            ColorScheme overrideColorScheme = gameplaySetupViewController.colorSchemesSettings.GetOverrideColorScheme();
-            ColorScheme beatmapOverrideColorScheme = null;
-            if (beatmapLevel is CustomBeatmapLevel customBeatmapLevel && difficultyBeatmap is CustomDifficultyBeatmap customDifficultyBeatmap)
+            var beatmapLevel = Loader.BeatmapLevelsModelSO.GetBeatmapLevel(level);
+
+            if (beatmapLevel == null)
             {
-                beatmapOverrideColorScheme = customBeatmapLevel.GetBeatmapLevelColorScheme(customDifficultyBeatmap.beatmapColorSchemeIdx);
+                Plugin.logger.Error($"[{nameof(StartCampaignLevel)}]: BeatmapLevel is null");
+                return;
             }
 
-            _menuTransitionsHelper.StartStandardLevel("Solo",
-                                                        difficultyBeatmap,
-                                                        beatmapLevel,
-                                                        gameplaySetupViewController.environmentOverrideSettings,
-                                                        overrideColorScheme,
-                                                        beatmapOverrideColorScheme,
-                                                        gameplayModifiers,
-                                                        playerSettings,
-                                                        null,
-                                                        "Menu",
-                                                        false,
-                                                        false,
-                                                        beforeSceneSwitchCallback,
-                                                        OnFinishedStandardLevel,
-                                                        OnRestartedStandardLevel);
+            GameplayModifiers gameplayModifiers = _currentMissionDataSO.gameplayModifiers;
+            GameplaySetupViewController gameplaySetupViewController = _campaignFlowCoordinator.GetField<GameplaySetupViewController, CampaignFlowCoordinator>("_gameplaySetupViewController");
+            PlayerSpecificSettings playerSettings = gameplaySetupViewController.playerSettings;
+            EnvironmentsListModel environmentsListModel = _campaignFlowCoordinator.GetField<EnvironmentsListModel, CampaignFlowCoordinator>("_environmentsListModel");
+            ColorScheme overrideColorScheme = gameplaySetupViewController.colorSchemesSettings.GetOverrideColorScheme();
+            ColorScheme beatmapOverrideColorScheme = beatmapLevel.GetColorScheme(_currentMissionDataSO.beatmapCharacteristic, _currentMissionDataSO.beatmapDifficulty);
+
+            //TODO: Check if issue with afterSceneSwitchCallback
+            _menuTransitionsHelper.StartStandardLevel(
+                "Solo",
+                _currentMissionDataSO.beatmapKey,
+                beatmapLevel,
+                gameplaySetupViewController.environmentOverrideSettings,
+                overrideColorScheme,
+                beatmapOverrideColorScheme,
+                gameplayModifiers,
+                playerSettings,
+                null,
+                environmentsListModel,
+                "Menu",
+                false,
+                false,
+                beforeSceneSwitchCallback,
+                null,
+                OnFinishedStandardLevel,
+                OnRestartedStandardLevel);
         }
 
         private void OnFinishedStandardLevel(StandardLevelScenesTransitionSetupDataSO standardLevelScenesTransitionSetupDataSO, LevelCompletionResults levelCompletionResults)
@@ -593,13 +612,20 @@ namespace CustomCampaigns.Managers
         public void OnMissionLevelSceneDidFinish(MissionLevelScenesTransitionSetupDataSO missionLevelScenesTransitionSetupDataSO, MissionCompletionResults missionCompletionResults)
         {
             Plugin.logger.Debug("updating player stats");
-            var level = (_missionLevelDetailViewController.missionNode.missionData as CustomMissionDataSO).customLevel.levelID;
-            var beatmapLevel = Loader.BeatmapLevelsModelSO.GetBeatmapLevelIfLoaded(level);
-            IDifficultyBeatmap difficultyBeatmap = BeatmapLevelDataExtensions.GetDifficultyBeatmap(beatmapLevel.beatmapLevelData, _currentMissionDataSO.beatmapCharacteristic, _currentMissionDataSO.beatmapDifficulty);
+
+            //TODO: Check if needed MissionData from here or from CurrentMissionDataSO
+            /*if (!(_missionLevelDetailViewController.missionNode.missionData is CustomMissionDataSO customMissionDataSO))
+            {
+                Plugin.logger.Error($"[{nameof(OnMissionLevelSceneDidFinish)}]: MissionData is null");
+                return;
+            }*/
+
+            //var beatmapLevel = Loader.BeatmapLevelsModelSO.GetBeatmapLevel(customMissionDataSO.beatmapLevel.levelID);
+            //IDifficultyBeatmap difficultyBeatmap = BeatmapLevelDataExtensions.GetDifficultyBeatmap(beatmapLevel.beatmapLevelData, _currentMissionDataSO.beatmapCharacteristic, _currentMissionDataSO.beatmapDifficulty);
 
             if (missionCompletionResults.levelCompletionResults.levelEndStateType == LevelCompletionResults.LevelEndStateType.Cleared)
             {
-                PlayerLevelStatsData playerLevelStatsData = _playerDataModel.playerData.GetPlayerLevelStatsData(difficultyBeatmap.level.levelID, difficultyBeatmap.difficulty, difficultyBeatmap.parentDifficultyBeatmapSet.beatmapCharacteristic);
+                PlayerLevelStatsData   playerLevelStatsData   = _playerDataModel.playerData.GetOrCreatePlayerLevelStatsData(_currentMissionDataSO.beatmapLevel.levelID, _currentMissionDataSO.beatmapDifficulty, _currentMissionDataSO.beatmapCharacteristic);
                 LevelCompletionResults levelCompletionResults = missionCompletionResults.levelCompletionResults;
                 playerLevelStatsData.UpdateScoreData(levelCompletionResults.modifiedScore, levelCompletionResults.maxCombo, levelCompletionResults.fullCombo, levelCompletionResults.rank);
             }
@@ -658,7 +684,7 @@ namespace CustomCampaigns.Managers
             else
             {
                 // incorrectly mark as cleared - fix it
-                if (!_currentMissionCleared && _playerDataModel.playerData.GetPlayerMissionStatsData(_currentNode.missionId).cleared)
+                if (!_currentMissionCleared && _playerDataModel.playerData.GetOrCreatePlayerMissionStatsData(_currentNode.missionId).cleared)
                 {
                     _campaignProgressModel.__SetMissionCleared(_currentNode.missionId, false);
                 }
@@ -722,7 +748,7 @@ namespace CustomCampaigns.Managers
             {
                 try
                 {
-                    await Loader.BeatmapLevelsModelSO.GetBeatmapLevelAsync(songId, CancellationToken.None);
+                    await Loader.BeatmapLevelsModelSO.LoadBeatmapLevelDataAsync(songId, CancellationToken.None);
                     loaded = true;
                 }
                 catch (Exception e)
@@ -766,14 +792,14 @@ namespace CustomCampaigns.Managers
             }
             else
             {
-                var difficultyBeatmap = BeatmapLevelDataExtensions.GetDifficultyBeatmap(Loader.BeatmapLevelsModelSO.GetBeatmapLevelIfLoaded((missionData as CustomMissionDataSO).customLevel.levelID).beatmapLevelData, missionData.beatmapCharacteristic, missionData.beatmapDifficulty);
-                if (difficultyBeatmap == null)
+                var beatmapLevel = Loader.BeatmapLevelsModelSO.GetBeatmapLevel((missionData as CustomMissionDataSO)!.beatmapLevel.levelID);
+                if (beatmapLevel == null)
                 {
                     errorList.Add(ModifierUtils.CreateModifierParam(AssetsManager.ErrorIcon, DIFFICULTY_NOT_FOUND_ERROR_TITLE, $"{DIFFICULTY_NOT_FOUND_ERROR_DESCRIPTION}{mission.difficulty} {NOT_FOUND_ERROR_SUFFIX}"));
                 }
                 else
                 {
-                    DifficultyData difficultyData = Collections.RetrieveDifficultyData(difficultyBeatmap);
+                    DifficultyData difficultyData = Collections.RetrieveDifficultyData(beatmapLevel, missionData.beatmapKey);
                     if (difficultyData != null)
                     {
                         foreach (string requirement in difficultyData.additionalDifficultyData._requirements)
@@ -782,7 +808,7 @@ namespace CustomCampaigns.Managers
                             errorList.Add(ModifierUtils.CreateModifierParam(AssetsManager.ErrorIcon, MISSING_CAPABILITY_ERROR_TITLE, $"{MISSING_CAPABILITY_ERROR_DESCRIPTION}{requirement}"));
                         }
                     }
-                    
+
                 }
             }
 
@@ -872,22 +898,33 @@ namespace CustomCampaigns.Managers
 
         #region Affinity Patches
         [AffinityPrefix]
-        [AffinityPatch(typeof(MissionLevelScenesTransitionSetupDataSO), "Init")]
+        [AffinityPatch(typeof(MissionLevelScenesTransitionSetupDataSO), "Init", AffinityMethodType.Normal,
+            new []
+            {
+                AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Ref,AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Normal,
+            },
+            typeof(string), typeof(BeatmapKey), typeof(BeatmapLevel), typeof(MissionObjective[]), typeof(ColorScheme), typeof(GameplayModifiers),
+            typeof(PlayerSpecificSettings), typeof(EnvironmentsListModel), typeof(BeatmapLevelsModel), typeof(AudioClipAsyncLoader),
+            typeof(PerformancePreset), typeof(BeatmapDataLoader), typeof(string))]
         public bool MissionLevelScenesTransitionSetupDataSOInitPrefix(ref MissionLevelScenesTransitionSetupDataSO __instance,
                                                                       ref SceneInfo ____missionGameplaySceneInfo,
                                                                       ref SceneInfo ____gameCoreSceneInfo,
                                                                       string missionId,
-                                                                      IDifficultyBeatmap difficultyBeatmap,
-                                                                      IPreviewBeatmapLevel previewBeatmapLevel,
+                                                                      BeatmapKey beatmapKey,
+                                                                      BeatmapLevel beatmapLevel,
                                                                       MissionObjective[] missionObjectives,
                                                                       ColorScheme overrideColorScheme,
                                                                       GameplayModifiers gameplayModifiers,
                                                                       PlayerSpecificSettings playerSpecificSettings,
+                                                                      EnvironmentsListModel environmentsListModel,
+                                                                      BeatmapLevelsModel beatmapLevelsModel,
+                                                                      AudioClipAsyncLoader audioClipAsyncLoader,
+                                                                      PerformancePreset performancePreset,
+                                                                      BeatmapDataLoader beatmapDataLoader,
                                                                       string backButtonText)
         {
             __instance.SetProperty("missionId", missionId);
-            __instance.SetProperty("difficultyBeatmap", difficultyBeatmap);
-            EnvironmentInfoSO environmentInfo = difficultyBeatmap.GetEnvironmentInfo();
+            EnvironmentInfoSO environmentInfo = environmentsListModel.GetEnvironmentInfoBySerializedNameSafe(beatmapLevel.GetEnvironmentName(beatmapKey.beatmapCharacteristic, beatmapKey.difficulty));
 
             GameplaySetupViewController gameplaySetupViewController = _campaignFlowCoordinator.GetField<GameplaySetupViewController, CampaignFlowCoordinator>("_gameplaySetupViewController");
             OverrideEnvironmentSettings overrideEnvironmentSettings = gameplaySetupViewController.environmentOverrideSettings;
@@ -909,23 +946,38 @@ namespace CustomCampaigns.Managers
                 }
             }
 
-            ColorScheme colorScheme = overrideColorScheme ?? new ColorScheme(environmentInfo.colorScheme);
-            IBeatmapLevel level = difficultyBeatmap.level;
+            var colorScheme = overrideColorScheme ?? new ColorScheme(environmentInfo.colorScheme);
 
             __instance.SetProperty<LevelScenesTransitionSetupDataSO, GameplayCoreSceneSetupData>("gameplayCoreSceneSetupData",
-                    new GameplayCoreSceneSetupData(difficultyBeatmap, previewBeatmapLevel, gameplayModifiers, playerSpecificSettings, null, false, environmentInfo, colorScheme, __instance.GetField<MainSettingsModelSO, MissionLevelScenesTransitionSetupDataSO>("_mainSettingsModel")));
-            SceneInfo[] scenes = new SceneInfo[]
+                    new GameplayCoreSceneSetupData(
+                        beatmapKey,
+                        beatmapLevel,
+                        gameplayModifiers,
+                        playerSpecificSettings,
+                        null,
+                        false,
+                        environmentInfo,
+                        colorScheme,
+                        performancePreset,
+                        audioClipAsyncLoader,
+                        beatmapDataLoader,
+                        beatmapLevelsModel,
+                        true,
+                        null
+                        ));
+
+            var scenes = new SceneInfo[]
             {
                 environmentInfo.sceneInfo,
                 ____missionGameplaySceneInfo,
                 ____gameCoreSceneInfo
             };
-            SceneSetupData[] sceneSetupData = new SceneSetupData[]
+
+            var sceneSetupData = new SceneSetupData[]
             {
-                new EnvironmentSceneSetupData(difficultyBeatmap.GetEnvironmentInfo(), previewBeatmapLevel, hideBranding: false),
-                new MissionGameplaySceneSetupData(missionObjectives, playerSpecificSettings.autoRestart, level, difficultyBeatmap.difficulty, difficultyBeatmap.parentDifficultyBeatmapSet.beatmapCharacteristic, gameplayModifiers, backButtonText),
-                __instance.GetProperty<GameplayCoreSceneSetupData, LevelScenesTransitionSetupDataSO>("gameplayCoreSceneSetupData"),
-                new GameCoreSceneSetupData()
+                new EnvironmentSceneSetupData(environmentInfo, beatmapLevel, hideBranding: false),
+                new MissionGameplaySceneSetupData(missionObjectives, playerSpecificSettings.autoRestart, beatmapKey, beatmapLevel, gameplayModifiers, backButtonText),
+                __instance.GetProperty<GameplayCoreSceneSetupData, LevelScenesTransitionSetupDataSO>("gameplayCoreSceneSetupData"), new GameCoreSceneSetupData()
             };
 
             var scenesTransitionSetupDataSO = (ScenesTransitionSetupDataSO) __instance;

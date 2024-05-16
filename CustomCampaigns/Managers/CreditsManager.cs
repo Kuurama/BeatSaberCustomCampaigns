@@ -218,7 +218,7 @@ namespace CustomCampaigns.Managers
                 return;
             }
 
-            CustomPreviewBeatmapLevel level = Loader.CustomLevels.Values.First(x => levelIDs.Contains(x.levelID));
+            var level = Loader.CustomLevels.Values.FirstOrDefault(x => levelIDs.Contains(x.levelID));
             if (level == null)
             {
                 Plugin.logger.Debug("no levels matching");
@@ -232,8 +232,12 @@ namespace CustomCampaigns.Managers
 
         private void OnAudioLoad(string levelID)
         {
-            var beatmapLevel = SongCore.Loader.BeatmapLevelsModelSO.GetBeatmapLevelIfLoaded(levelID);
-            var audioClip = beatmapLevel.beatmapLevelData.audioClip;
+            var beatmapLevel = Loader.BeatmapLevelsModelSO.GetBeatmapLevel(levelID);
+            if (beatmapLevel is null) return;
+
+            var audioClipTask = beatmapLevel.previewMediaData.GetPreviewAudioClip(CancellationToken.None);
+            audioClipTask.Wait();
+            var audioClip = audioClipTask.Result;
 
             Plugin.logger.Debug("got audio clip");
             var audioPlayer = _creditsController.GetField<AudioPlayerBase, CreditsController>("_audioPlayer") as SimpleAudioPlayer;
@@ -251,7 +255,7 @@ namespace CustomCampaigns.Managers
         private async void LoadBeatmap(string levelID)
         {
             Plugin.logger.Debug($"Loading beatmap: {levelID}");
-            await Loader.BeatmapLevelsModelSO.GetBeatmapLevelAsync(levelID, CancellationToken.None);
+            await Loader.BeatmapLevelsModelSO.LoadBeatmapLevelDataAsync(levelID, CancellationToken.None);
             AudioLoaded?.Invoke(levelID);
         }
     }
