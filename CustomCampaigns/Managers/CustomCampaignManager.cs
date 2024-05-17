@@ -901,7 +901,7 @@ namespace CustomCampaigns.Managers
         [AffinityPatch(typeof(MissionLevelScenesTransitionSetupDataSO), "Init", AffinityMethodType.Normal,
             new []
             {
-                AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Ref,AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Normal,
+                AffinityArgumentType.Normal,AffinityArgumentType.Ref,AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal, AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Normal,AffinityArgumentType.Normal,
             },
             typeof(string), typeof(BeatmapKey), typeof(BeatmapLevel), typeof(MissionObjective[]), typeof(ColorScheme), typeof(GameplayModifiers),
             typeof(PlayerSpecificSettings), typeof(EnvironmentsListModel), typeof(BeatmapLevelsModel), typeof(AudioClipAsyncLoader),
